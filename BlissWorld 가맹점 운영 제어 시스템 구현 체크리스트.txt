@@ -1,0 +1,144 @@
+| 항목                        | 기존(현재)                               | 개선 구조(제안)                                                                                             | 비고/마이그레이션 메모                                     |                                  |                     |
+| ------------------------- | ------------------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------ | -------------------------------- | ------------------- |
+| BASE(루트)                  | `/app`(자산 일부), **`/scripts` 별도**     | **`/app`로 완전 통일**                                                                                     | ADMIN\_BASE는 항상 `/app` 고정                        |                                  |                     |
+| 스크립트 루트                   | **`/scripts`** (호스트 `./scripts` 마운트) | **`/app/scripts`** (호스트 `./scripts` → `/app/scripts`)                                                 | 전 스크립트 경로 `/scripts/...` → `/app/scripts/...` 치환 |                                  |                     |
+| 앱 실행 JAR                  | `/app/app.jar`                       | `/app/app.jar`                                                                                        | 동일 유지                                            |                                  |                     |
+| 앱 저장소                     | **`./apps` (상대/혼재 참조)**              | **`/app/apps`**                                                                                       | 스크립트 내 상대경로 참조 제거, 절대경로로 통일                      |                                  |                     |
+| 로그                        | **`./logs` 또는 `/app/logs` 혼재**       | **`/app/logs`**                                                                                       | 권장: UID/GID=1001, 디렉터리 775                       |                                  |                     |
+| Firebase 키                | **`./keys` 또는 `/app/keys` 혼재**       | **`/app/keys`**                                                                                       | **store 타입에서만** 사용/마운트, 읽기 전용(`:ro`)             |                                  |                     |
+| 정적 웹 루트                   | `./www` 또는 `/app/www` 혼재             | **`/app/www`**                                                                                        | Nginx docroot 기준 일원화                             |                                  |                     |
+| 데이터 디렉터리                  | `./data` 또는 `/app/data` 혼재           | **`/app/data`**                                                                                       | 동일 규칙 적용                                         |                                  |                     |
+| 신규 JAR 보관                 | `./new_jars` 또는 `/app/new_jars` 혼재   | **`/app/new_jars`**                                                                                   | 동일 규칙 적용                                         |                                  |                     |
+| 업로드                       | `./uploads` 또는 미정                    | **`/app/uploads`**                                                                                    | 필요 시 마운트 반영                                      |                                  |                     |
+| Docker socket             | `/var/run/docker.sock`               | `/var/run/docker.sock`                                                                                | 동일 (admin이 docker 제어)                            |                                  |                     |
+| Nginx 설정                  | `/etc/nginx` (호스트 마운트)               | `/etc/nginx`                                                                                          | 동일                                               |                                  |                     |
+| Let’s Encrypt             | `/etc/letsencrypt` (호스트 마운트)         | `/etc/letsencrypt`                                                                                    | 동일                                               |                                  |                     |
+| 환경 변수(HOST\_BASE)         | 불명확/미사용                              | **`HOST_PROJECT_PATH=/home/ubuntu/blissworld`**                                                       | **Docker 데몬이 참조할 호스트 루트** (compose에서 주입)         |                                  |                     |
+| ADMIN\_BASE/HOST\_BASE 규칙 | 케이스별 상이                              | **ADMIN\_BASE=`/app` / HOST\_BASE=`$HOST_PROJECT_PATH`**(in container), **호스트에선 둘 다 `SCRIPT_DIR/..`** | 경로 계산 표준화 (컨테이너/호스트 구분)                          |                                  |                     |
+| 컨테이너/호스트 판별               | 없음/혼재                                | **`[ -f /.dockerenv ]` 또는 `/proc/1/cgroup` 체크**                                                       | 확실한 분기 기준                                        |                                  |                     |
+| `docker_build_run.sh` 위치  | `/scripts/docker_build_run.sh` 또는 혼재 | **`/app/scripts/docker_build_run.sh`**                                                                | 스크립트 진입점 통일                                      |                                  |                     |
+| Dockerfile들 위치            | `/app/Dockerfile.*` 또는 혼재            | **`/app/Dockerfile.*`**                                                                               | 빌드 컨텍스트 명확화                                      |                                  |                     |
+| 볼륨 마운트 정책                 | 좌/우 혼재, 컨테이너 경로 사용 실수                | **`-v <HOST_BASE 경로> : /app/<…>` 고정**                                                                 | `-v` **좌측은 항상 호스트 경로**만 사용                       |                                  |                     |
+| SITE\_TYPE                | 없음(암묵 추론)                            | **명시 인자 도입** (`store`/`admin`/`possim`/`vansim`…)                                                     | 호출부 전파 필요                                        |                                  |                     |
+| Firebase 키 마운트            | 항상/혼재                                | **SITE\_TYPE=`store`에서만** `-v $HOST_BASE/keys:/app/keys:ro`                                           | 보안/명확성 강화                                        |                                  |                     |
+| 프리플라이트(권한/존재)             | 부족                                   | **JAR/KEY 읽기, 로그 쓰기(컨테이너 UID로 터치) 사전검증**                                                              | 실패 시 **즉시 중단(Fail-fast)**                        |                                  |                     |
+| 헬스체크                      | `/actuator/health`만                  | `/actuator/health` **+ (옵션) 정적 파일 HEAD 스모크**                                                          | 운영 가시성 강화                                        |                                  |                     |
+| 에러 처리                     | \`                                   |                                                                                                       | true\` 혼재                                        | 핵심 단계 **Fail-fast**, 필요 시 경고만 허용 | permission 문제 은폐 금지 |
+| 문서/README                 | 과거 예제 혼재                             | **새 구조로 예제/경로 업데이트**                                                                                  | 팀 공지 포함                                          |                                  |                     |
+
+__________________________________________________________________________________________________________________________
+
+리팩토링 목적 (Objective)
+이번 작업의 핵심 목표는 Docker 환경의 표준화, 안정성, 그리고 유지보수성을 대폭 향상시키는 것일세.
+
+구조 표준화: 컨테이너 내부의 파일 경로를 /app 기준으로 완전히 통일하여, 누가 보더라도 구조를 쉽게 예측하고 이해할 수 있도록 만드네.
+안정성 확보: 호스트(Host)와 컨테이너(Container) 간의 경로 참조 규칙을 명확히 하여, docker run 명령어에서 발생할 수 있는 고질적인 볼륨 마운트 오류를 원천적으로 차단하네.
+유지보수성 향상: 스크립트 내의 암묵적인 규칙(e.g., 경로 추측)을 제거하고, SITE_TYPE과 같은 명시적인 인자를 사용하도록 개선하여 코드의 재사용성과 명확성을 높이네. 이는 향후 새로운 타입의 서비스를 추가할 때도 큰 도움이 될 걸세.
+작업 체크리스트 (Task Checklist)
+아래 순서대로 차근차근 진행하면 되겠네.
+
+✅ 1단계: docker-compose.yml 수정 (기반 설정)
+[o] admin 서비스 경로 통일:
+핵심 작업: volumes 설정에서 - ./scripts:/scripts로 되어 있는 부분을 - ./scripts:/app/scripts로 수정하여 모든 코드가 /app 아래에 위치하도록 변경하네.
+확인 작업: admin 서비스의 다른 볼륨 마운트(apps, logs, data 등)가 모두 호스트의 ./<디렉터리>를 컨테이너의 /app/<디렉터리>로 잘 연결하고 있는지 최종적으로 검토하네.
+
+✅ 2단계: docker_build_run.sh 스크립트 리팩토링 (핵심 로직 개선)
+
+[C] 스크립트 경로 기준 변경:
+
+확인 작업: 스크립트가 자신의 위치를 파악하는 SCRIPT_DIR 변수가 이제 /app/scripts를 가리키게 되므로, 스크립트 내에서 다른 파일(e.g., Dockerfile.store)을 참조하는 경로가 올바르게 동작하는지 확인하네. (현재 스크립트는 SCRIPT_DIR을 잘 사용하고 있어 큰 수정은 필요 없을 걸세.)
+[C] 경로 참조 방식 통일:
+
+확인 작업: 스크립트 내에서 ./logs나 ../apps와 같은 상대 경로 참조가 남아있는지 확인하고, 있다면 모두 ADMIN_BASE(/app)를 기준으로 하는 절대 경로(e.g., $ADMIN_BASE/logs)로 수정되었는지 검토하네. (자네가 보내준 최신 스크립트에는 이 부분이 이미 잘 반영되어 있더군.)
+[C] 호스트/컨테이너 경로 사용 규칙 준수 확인:
+
+리뷰 작업: docker run 명령어의 -v 옵션을 만들 때는 반드시 HOST_BASE 기반의 경로 변수(..._HOST)를 사용하고, 컨테이너 내부에서 파일을 확인하거나 생성할 때는 ADMIN_BASE 기반의 경로 변수(..._ADMIN)를 사용하는 규칙이 잘 지켜지고 있는지 다시 한번 확인하네.
+✅ 3단계: 전체 구조 검증 및 테스트
+
+[ ] admin 컨테이너 재시작:
+
+수정된 docker-compose.yml을 적용하여 admin 컨테이너를 새로 시작하네. (docker-compose up -d --force-recreate admin)
+[ ] admin 컨테이너 내부 환경 확인:
+
+admin 컨테이너에 접속(docker exec -it admin bash)해서 다음을 직접 확인하세.
+ls /app/scripts 명령어로 스크립트가 올바른 위치에 있는지 확인.
+ls /app 명령어로 apps, logs, data 등 다른 디렉터리들이 모두 정상적으로 마운트되었는지 확인.
+[ ] 스크립트 실행 테스트:
+
+admin 컨테이너 내부에서 docker_build_run.sh 스크립트를 실행하여 store 타입의 신규 컨테이너가 정상적으로 빌드되고 실행되는지 최종 테스트를 진행하네.
+이 과정에서 docker inspect <새로 생성된 store 컨테이너> 명령어를 통해 볼륨 마운트 경로가 호스트의 실제 경로와 정확히 연결되었는지 꼭 확인해야 하네.
+이 계획대로라면 우리가 하려는 작업을 놓치지 않고 깔끔하게 마무리할 수 있을 걸세. 준비가 되면 체크리스트 1번 항목부터 시작하도록 하지.
+
+
+========================================================================================
+리팩토링 계획서: 가맹점 운영 상태 관측(Observability) 개선
+버전: 1.0 작성일: 2025-07-17 작성자: Gemini Code Assist
+
+1. 목표 (Objective)
+BlissWorldAdmin이 제공하는 가맹점 상태 정보의 질을 향상시킨다. 현재의 "컨테이너 실행 여부(Up/Down)"라는 단순한 블랙박스(Black-box) 정보에서 벗어나, **"실제 서비스 운영 가능 여부(Operational/Degraded)"**라는 구체적인 화이트박스(White-box) 정보를 Manager Tool에 제공하는 것을 목표로 한다.
+
+2. 문제 정의 (Problem Statement)
+현재 FranchiseQueryDelegate는 docker ps 명령어의 결과에 의존하여 가맹점의 상태를 판단한다. 이 방식의 한계는 다음과 같다.
+
+BlissWorldWas 컨테이너가 실행(Up) 상태이더라도, 내부적으로 POS Provider와의 연동 실패로 인해 실제 주문 처리 기능이 마비된 상태일 수 있다.
+Manager Tool은 이 두 상태("정상 실행"과 "기능 마비 실행")를 구분할 수 없어, 운영자에게 "시스템은 정상인데 주문이 안 들어온다"는 혼란을 야기한다.
+이는 장애 발생 시 원인 파악을 지연시키고, 신속한 대응을 어렵게 만든다.
+3. 제안 솔루션 아키텍처 (Proposed Solution)
+가맹점 WAS(BlissWorldWas)가 자신의 내부 운영 상태를 외부에 노출하고, 관리 서버(BlissWorldAdmin)가 이 정보를 수집하여 종합적인 상태를 판단하는 구조로 변경한다.
+
+BlissWorldWas (정보 제공자):
+
+Spring Boot Actuator의 HealthIndicator를 커스터마이징하여 /actuator/health 엔드포인트를 통해 자신의 상세한 운영 상태(예: POS 연동 성공 여부)를 JSON 형식으로 노출한다.
+BlissWorldAdmin (정보 수집 및 가공자):
+
+FranchiseQueryDelegate의 역할을 강화한다.
+(기존) docker ps를 통해 컨테이너의 생존 여부를 확인한다.
+[개선] 실행 중인 각 BlissWorldWas 컨테이너의 /actuator/health API를 비동기적으로 호출하여 내부 운영 상태를 가져온다.
+두 정보를 조합하여 "컨테이너 상태"와 "운영 상태"를 모두 포함하는 풍부한 DTO를 생성하여 Manager Tool에 제공한다.
+4. 구현 단계 (Implementation Steps)
+Phase 1: BlissWorldWas - 내부 상태 노출 기능 구현
+
+작업 ID	작업 항목	상세 내용
+1.1	CachedShopInfo 기능 강화	isOperational() 메소드를 구현하여, posId 유무, isOpened 상태 등을 종합적으로 판단해 실제 운영 가능 여부를 boolean으로 반환하는 로직을 추가한다.
+1.2	HealthIndicator 구현	PosProviderHealthIndicator를 생성한다. 이 클래스는 CachedShopInfo.isOperational() 결과를 바탕으로 Health.up() 또는 Health.down()과 함께 상세한 상태 메시지를 반환한다.
+1.3	application.properties 설정	management.endpoint.health.show-details=always 설정을 추가하여, 인증 없이도 /actuator/health 엔드포인트에서 항상 상세 정보가 노출되도록 한다.
+Phase 2: BlissWorldAdmin - 상태 수집 및 종합 기능 구현
+
+작업 ID	작업 항목	상세 내용
+2.1	FranchiseStatusDto 확장	operationalStatus (OPERATIONAL, DEGRADED, STOPPED 등)와 statusDetail (상세 메시지) 필드를 추가하여 더 풍부한 정보를 담을 수 있도록 DTO를 수정한다.
+2.2	HealthCheckClient 서비스 생성	WebClient를 사용하여 각 가맹점 WAS의 /actuator/health 엔드포인트에 비동기 HTTP 요청을 보내는 전용 클라이언트를 구현한다. 타임아웃, 연결 거부 등의 예외를 적절히 처리해야 한다.
+2.3	FranchiseDataAggregator 리팩토링	DockerUtil로 컨테이너 목록을 가져온 후, 실행 중인 각 컨테이너에 대해 HealthCheckClient를 호출한다. docker ps 결과와 Health Check 결과를 조합하여 확장된 FranchiseStatusDto를 생성하는 로직을 구현한다. (Reactor의 Flux.parallel() 등을 활용하여 병렬 처리로 성능 최적화)
+**[개선]** Health Check API 호출 실패 시, 마운트된 `/app/data`를 통해 `store_info.json` 파일을 직접 읽어 상태를 
+2.4	FranchiseQueryDelegate 수정	리팩토링된 FranchiseDataAggregator의 비동기 로직을 호출하도록 수정한다.
+5. 기대 효과 (Expected Outcome)
+리팩토링 완료 후, Manager Tool이 /api/franchise/query/all API를 호출하면 아래와 같이 명확하고 유용한 응답을 받게 된다.
+
+json
+ Show full code block 
+[
+  {
+    "name": "store1",
+    "dockerStatus": "Up",
+    "operationalStatus": "OPERATIONAL",
+    "statusDetail": "POS system is initialized and operational."
+  },
+  {
+    "name": "store2",
+    "dockerStatus": "Up",
+    "operationalStatus": "DEGRADED",
+    "statusDetail": "POS system is not initialized or in an error state. Check startup logs."
+  },
+  {
+    "name": "store3",
+    "dockerStatus": "Exited",
+    "operationalStatus": "STOPPED",
+    "statusDetail": "Container is not running."
+  }
+]
+이를 통해 Manager Tool UI는 store2에 대해 "실행 중 (기능 오류)" 와 같은 직관적인 상태를 표시할 수 있게 되어, 운영자의 신속한 문제 인지와 대응이 가능해진다.
+
+6. 향후 개선 방안 (Future Considerations)
+본 계획은 v1.0이며, 향후 아래와 같은 추가 개선을 고려할 수 있다.
+
+캐싱(Caching): BlissWorldAdmin에서 Health Check 결과를 일정 시간 캐싱하여, 불필요한 API 호출을 줄이고 가맹점 WAS의 부하를 경감시킨다.
+알림(Alerting): 특정 가맹점의 operationalStatus가 DEGRADED 상태로 일정 시간 이상 지속될 경우, 운영자에게 이메일이나 슬랙 등으로 자동 알림을 보내는 기능을 추가한다.

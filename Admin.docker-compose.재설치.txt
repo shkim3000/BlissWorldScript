@@ -1,0 +1,43 @@
+[[[ docker-compose 재 설치 ]]]
+1단계: 모든 것 정리하기 (A Clean Slate)
+# 1. 실행 중인 모든 컨테이너를 중지하고 삭제합니다.
+cd ~/blissworld
+sudo docker compose down
+
+# 2. 혹시 모를 다른 컨테이너와 네트워크도 정리합니다.
+sudo docker ps -aq | xargs --no-run-if-empty sudo docker rm -f
+sudo docker network prune -f
+
+# 3. 이전의 실패가 남긴 Nginx와 Certbot의 '유령 설정'을 완전히 삭제합니다.
+sudo rm -rf /etc/nginx/sites-available/*
+sudo rm -rf /etc/nginx/sites-enabled/*
+sudo rm -rf /etc/letsencrypt/{live,archive,renewal}/*
+
+# 4. 프로젝트의 데이터 디렉토리를 깨끗하게 비웁니다.
+sudo rm -rf ~/blissworld/apps/*
+sudo rm -rf ~/blissworld/www/*
+sudo rm -rf ~/blissworld/logs/*
+sudo rm -rf ~/blissworld/new_jars/*
+
+# 5. 비워진 디렉토리들을 다시 생성합니다.
+mkdir -p ~/blissworld/{apps,www,logs,new_jars}
+
+2단계: admin을 위한 최소한의 준비
+admin JAR 파일 업로드: BlissWorldAdminWas-0.0.2-SNAPSHOT.jar 파일을 ~/blissworld/apps/admin/ 디렉토리에 업로드해주세요.
+디렉토리 소유권 설정: admin 컨테이너가 파일을 쓸 수 있도록, docker_build_run.sh가 하던 소유권 설정을 수동으로 한번 실행해줍니다.
+bash
+sudo chown -R 1001:1001 ~/blissworld/{apps,www,logs,new_jars}
+3단계: 시스템 재시작 및 최종 설정
+Docker Compose로 시스템 시작: docker-compose.yml이 있는 ~/blissworld 디렉토리에서.
+
+# (1) admin 이미지 + 컨테이너 빌드 & 실행
+cd ~/blissworld/scripts
+./docker_build_run.sh admin 8082 BlissWorldAdminWas-0.0.2-SNAPSHOT.jar
+
+# (2) nginx만 docker compose로 실행
+cd ~/blissworld
+sudo docker compose up -d nginx
+
+# (3) admin 설정 실행
+sudo docker exec -u root admin /scripts/setup_franchise_site.sh admin.blissworld.org 8082 api
+

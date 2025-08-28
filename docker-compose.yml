@@ -1,0 +1,67 @@
+
+services:
+  admin:
+    # [수정] docker-compose가 직접 이미지를 빌드하도록 build 컨텍스트를 지정하네.
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.admin
+      args:
+        # 호스트의 docker GID를 전달하여 컨테이너 내부 사용자가 docker.sock에 접근할 수 있도록 하네.
+        DOCKER_GID: ${DOCKER_GID:-999}
+    container_name: admin
+    # [개선] admin 컨테이너의 자원 사용량을 제한하여 시스템 안정성을 높입니다.
+    mem_limit: 384m
+    cpus: '1.0'
+    ports:
+      - "8082:8080"
+    environment:
+      # [계약 1] 컨테이너 내부 스크립트가 호스트의 프로젝트 경로를 알 수 있도록 환경 변수를 주입합니다.
+      - HOST_PROJECT_PATH=${HOST_PROJECT_PATH:-/home/ubuntu/blissworld}
+    volumes:
+      # [계약 2] 가맹점 데이터 관리/비상 조치를 위해 호스트의 data 디렉토리를 마운트합니다.
+      - ./data:/app/data
+      - ./apps:/app/apps
+      - ./logs:/app/logs
+      - ./new_jars:/app/new_jars
+      - ./keys:/app/keys:ro                 # 호스트의 keys 디렉토리를 컨테이너의 /app/keys로 읽기 전용 마운트
+      - ./scripts:/app/scripts              # [수정] 스크립트 경로를 /app 아래로 통일
+      - ./www:/app/www
+      - /var/run/docker.sock:/var/run/docker.sock # [계약 3] 호스트 Docker 제어를 위한 소켓 마운트
+      - /etc/nginx:/etc/nginx                     # 절대 삭제 하지마라. [계약 4] Nginx 설정 파일 제어를 위한 마운트
+      - /etc/letsencrypt:/etc/letsencrypt         # [계약 5] SSL 인증서 제어를 위한 마운트
+    networks:
+      - blissworld-net
+
+  nginx:
+    depends_on:
+      - admin
+    # image: nginx:latest         ???? 07/26 삭제
+    # [수정] Certbot을 포함한 커스텀 Nginx 이미지를 빌드하도록 변경하네.  ???? 07/26 line 31~34 추가
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.nginx
+    container_name: nginx
+    # [개선] nginx 컨테이너의 자원 사용량을 제한하네.
+    mem_limit: 128m
+    cpus: '0.5'
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # [수정] admin 컨테이너와 경로를 일치시켜 혼동을 줄이네.
+      - ./www:/app/www
+      - /etc/nginx:/etc/nginx
+      - /etc/letsencrypt:/etc/letsencrypt
+      # [추가] Certbot이 인증 파일을 생성하고, Nginx가 해당 파일을 읽을 수 있도록 공유 볼륨을 마운트하네.
+      - certbot-webroot:/var/www/certbot
+    restart: unless-stopped
+    networks:
+      - blissworld-net
+
+networks:
+  blissworld-net:
+    external: true
+
+volumes:
+  certbot-webroot:
+    driver: local

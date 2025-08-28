@@ -1,0 +1,50 @@
+FROM eclipse-temurin:21-jdk-jammy
+
+# 환경 설정
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 빌드 시 호스트에서 전달받을 DOCKER_GID 인자 선언
+ARG DOCKER_GID
+
+# appuser 생성
+RUN groupadd --gid 1001 appgroup && \
+    groupadd --gid "${DOCKER_GID}" docker && \
+    useradd --uid 1001 --gid 1001 --groups docker --shell /bin/bash --create-home appuser
+
+# 필수 도구 설치: certbot, nginx, docker CLI 등
+
+RUN apt-get update && \
+    apt-get install -y \
+      nginx=1.18.0-6ubuntu14.6 dnsutils \
+      ca-certificates curl gnupg lsb-release sudo unzip \
+      --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+# Docker CLI 설치를 위한 공식 Docker GPG 키 및 repo 등록
+RUN mkdir -m 0755 -p /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    echo \
+    "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu jammy stable" \
+    | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && \
+    apt-get install -y docker-ce-cli --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+# 작업 디렉토리 준비
+WORKDIR /app
+# [수정] 빌드 컨텍스트의 모든 것을 복사하는 대신, 애플리케이션 실행에 필요한 'app.jar' 파일만 명시적으로 복사합니다.
+# 이렇게 하면 불필요한 파일(스크립트, 다른 Dockerfile 등)이 이미지에 포함되는 것을 막고, 빌드 오류 가능성을 줄일 수 있습니다.
+COPY app.jar .
+
+# --- 하위 호환성을 위한 심볼릭 링크 ---
+# [추가] Java 애플리케이션은 아직 예전 경로인 /scripts를 참조하고 있네.
+# 우리의 새로운 표준(/app/scripts)을 유지하면서 하위 호환성을 제공하기 위해, /scripts를 /app/scripts로 연결하는 심볼릭 링크를 생성하네.
+RUN ln -s /app/scripts /scripts
+
+# 퍼미션
+# [수정] /scripts 디렉토리는 런타임에 볼륨으로 마운트되므로, 이미지 빌드 시점에는 /app 디렉토리의 권한만 설정하면 됩니다.
+RUN chown -R appuser:appgroup /app
+
+USER appuser
+
+CMD ["java", "-jar", "app.jar"]
