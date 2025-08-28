@@ -46,5 +46,7 @@ fi
 echo "📦 파일을 압축 해제하고 원본을 정리합니다..."
 mkdir -p "$DEST_DIR"
 unzip -o "$SOURCE_ZIP" -d "$DEST_DIR" && rm -f "$SOURCE_ZIP"
+# BlissWorldWas가 직접 static data update가능할 수 있도록 appuser 소유로 변경.
+chown -R 1001:1001 "$DEST_DIR"
 
 echo "✅ 성공: '$DOMAIN'에 대한 정적 파일 배포가 완료되었습니다."
