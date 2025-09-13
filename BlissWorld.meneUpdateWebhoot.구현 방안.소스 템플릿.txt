@@ -1,0 +1,339 @@
+[case: mene update / polling]
+[blissWorldManager]		[blissWorldShop]		[blissWorldWeb]		[blissWorldAdmin]	[blissWorldWes]		[VAN / PG]			[POS System]
+		|				|				|				|				|				|				|
+		|				|				|				|				|				|				|
+		|				|				|				|------ fetchMenu------>|				|				|
+		|				|				|				|				|--------------    post(/api/menu)  -------------->|
+		|				|				|				|				|				|				|
+		|				|				|				|				|<--------------     menu.json     ------------------|
+		|				|				|				|				|				|				|
+		|				|				|				|				|--------------   post(/api/images)  -------------->|
+		|				|				|				|				|				|				|
+		|				|				|				|				|<--------------     images         ------------------|
+		|				|				|				|				|				|				|
+		|				|				|				|				|* store에 맟게 가공	|				|
+		|				|				|				|				|				|				|
+		|				|				|<------ /data/menu.json, /images/이미지 ------|				|				|
+		|				|				|				|				|				|				|
+		|				|				|				|				|				|				|
+_________________________________________________________________________________________________________________________________________________________________________________________
+[case: mene update / webhook]
+[blissWorldManager]		[blissWorldShop]		[blissWorldWeb]		[blissWorldAdmin]	[blissWorldWes]		[VAN / PG]			[POS System]
+		|				|				|				|				|				|				|
+		|				|				|				|				|				|				|
+		|				|				|				|				|				|				|1. 여기서 메뉴 변경/저장
+		|				|				|				|				|				|				|
+		|				|				|				|<-------------        2. Webhook: "메뉴 변경됨!"    -------------------------|
+		|				|				|				|				|				|				|
+		|				|				|				|-------------        3. 최신 메뉴 데이터 요청       ------------------------->|
+		|				|				|				|			(POS Provider의 API 호출)					|
+		|				|				|				|				|				|				|
+		|				|				|				|<-------------        4. menu.json, 이미지 반환      -------------------------|
+		|				|				|				|				|				|				|
+		|				|				|				|				|				|				|
+		|				|				|				|5. 데이터 가공 및 처리					|				|
+		|				|				|				|				|				|				|
+		|				|				|				|				|				|				|
+		|				|				|<--push 가공데이타---	|				|				|				|
+		|				|				|				|				|				|				|
+		|				|				|				|				|				|				|
+		|				|				|				|				|				|				|
+		|				|				|				|				|				|				|
+_____________________________________________________________________________________________________________________________________________________________________________________
+[비동기 처리 방안]
+@Async를 “잘 튜닝된 실행기(스레드풀) + 논블로킹 I/O(WebClient) + 작업 분리(얇은/무거운 작업 풀 분리) + 역압(backpressure)/재시도 제어”와 세트로 써야 수십~수백 개 Webhook도 안정적으로 처리
+핵심 가이드
+1) 경량(웹훅 수신/검증/큐잉)과 중량(메뉴 페치·이미지 다운로드·배포)을 풀(Executor) 분리
+
+lightExecutor: webhook 수신 직후 검증, 이벤트 기록, “작업 큐 등록”만 처리 → 매우 짧게 끝나야 함.
+
+ioExecutor: POS API 호출, 변환, 이미지 다운로드 등 I/O 위주 작업.
+
+deployExecutor: rsync/scp 같은 외부 프로세스 실행(블로킹) 전용, 동시성 엄격히 제한.
+
+이유: 이미지 다운로드/rsync가 풀을 점유하면 webhook 수신이 밀려 5xx/타임아웃이 나기 쉬움.
+
+2) 논블로킹 우선
+
+POS API 호출/변환은 Spring WebFlux + WebClient 권장.
+
+@Async는 경량 컨트롤/오케스트레이션에 쓰고, I/O 대량 병렬은 Reactor의 flatMap(concurrency=N)로 제어.
+
+3) 동시성 한도(Concurrency)와 스레드 수
+
+CPU 바운드가 아니므로 스레드는 I/O 대기 비율에 좌우됨. 보수적으로:
+
+lightExecutor: 코어수 정도(예: 8코어 → core=8, max=16)
+
+ioExecutor: 네트워크/디스크 I/O 병렬을 감안해 50~200 사이에서 시작, 관찰 후 조정
+
+deployExecutor: 안전하게 2~4 (rsync/scp는 병렬 늘리면 디스크/네트워크 병목과 실패율↑)
+
+공식 톤: “조용히 시작해서, 관찰하며 올린다.” (메트릭 필수)
+
+4) 중복/폭주 방지
+
+idempotency key: storeId + updatedAt(version) 기준으로 중복 수신 무시/병합.
+
+per-store 단일 실행 보장: 같은 storeId에 대해 동시에 2개 이상 배포 금지(분산 락 or in-memory 스트라이프 락).
+
+버퍼/큐: 내부 큐(예: BlockingQueue 또는 RDB 작업 테이블)로 스파이크 흡수.
+
+더 확장할 거면 RabbitMQ/Kafka로 “Webhook → 이벤트 큐 → 워커” 패턴이 최상.
+
+5) 타임아웃/재시도/서킷브레이커
+
+WebClient에 연결/읽기 타임아웃(예: 3s/10s) + 지수 백오프 재시도(최대 3회).
+
+Resilience4j로 서킷브레이커와 레이트리미터(POS API 보호) 적용.
+
+6) 관측 가능성(Observability)
+
+필수 태그: traceId, storeId, eventId, posProvider.
+
+각 단계(수신→페치→변환→이미지→배포) 소요시간/성공률 계측.
+
+실패 카테고리 분류: 인증/권한, 네트워크, 데이터 포맷, 저장소 권한, 배포 실패.
+=========================
+A. Executor 설정
+@Configuration
+@EnableAsync
+public class AsyncConfig {
+
+  @Bean(name = "lightExecutor")
+  public Executor lightExecutor() {
+    ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();
+    ex.setThreadNamePrefix("light-");
+    ex.setCorePoolSize(Math.max(4, Runtime.getRuntime().availableProcessors()));
+    ex.setMaxPoolSize(ex.getCorePoolSize() * 2);
+    ex.setQueueCapacity(1000); // 짧은 작업, 큐는 넉넉히
+    ex.initialize();
+    return ex;
+  }
+
+  @Bean(name = "ioExecutor")
+  public Executor ioExecutor() {
+    ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();
+    ex.setThreadNamePrefix("io-");
+    ex.setCorePoolSize(32);     // 시작점: 32~64
+    ex.setMaxPoolSize(128);
+    ex.setQueueCapacity(2000);
+    ex.initialize();
+    return ex;
+  }
+
+  @Bean(name = "deployExecutor")
+  public Executor deployExecutor() {
+    ThreadPoolTaskExecutor ex = new ThreadPoolTaskExecutor();
+    ex.setThreadNamePrefix("deploy-");
+    ex.setCorePoolSize(2);
+    ex.setMaxPoolSize(4);
+    ex.setQueueCapacity(50);    // 배포는 병렬을 낮게
+    ex.initialize();
+    return ex;
+  }
+}
+
+===================================
+B. Webhook 수신부(즉시 200 OK + 비동기 위임)
+@RestController
+@RequestMapping("/api/hooks/pos")
+@RequiredArgsConstructor
+public class PosWebhookController {
+  private final WebhookService webhookService;
+
+  @PostMapping("/menu-updated")
+  public ResponseEntity<Void> menuUpdated( 
+					@RequestBody MenuUpdatedEvent event,
+					@RequestHeader("X-POS-API-KEY") String apiKey,
+					HttpServletRequest req) {
+    webhookService.acceptEvent(event, apiKey, req.getRemoteAddr());
+    return ResponseEntity.ok().build(); // 즉시 반환
+  }
+}
+
+@Data
+public class MenuUpdatedEvent {
+  private String storeId;
+  private String updatedAt; // 또는 version/seq
+}
+
+====================================
+C. 수신 서비스(검증 → 큐잉)
+@Service
+@RequiredArgsConstructor
+public class WebhookService {
+  private final SecurityGuard guard;
+  private final EventQueue queue;
+
+  @Async("lightExecutor")
+  public void acceptEvent(MenuUpdatedEvent ev, String apiKey, String ip) {
+    guard.ensureAllowed(apiKey, ip);     // 키/화이트리스트 검증
+    if (!queue.enqueueIfNew(ev)) return; // idempotency (중복 차단)
+    // 이후 실제 처리 워커가 가져가서 실행
+  }
+}
+
+큐/워커(간단 버전: in-memory, 운영은 MQ로 교체 용이)
+@Component
+@RequiredArgsConstructor
+public class EventQueue {
+  private final BlockingQueue<MenuUpdatedEvent> q = new LinkedBlockingQueue<>(5000);
+  private final ConcurrentMap<String, String> seen = new ConcurrentHashMap<>(); // storeId->lastVersion
+
+  public boolean enqueueIfNew(MenuUpdatedEvent ev) {
+    String key = ev.getStoreId();
+    String v = ev.getUpdatedAt();
+    String prev = seen.get(key);
+    if (prev != null && prev.equals(v)) return false;
+    seen.put(key, v);
+    return q.offer(ev);
+  }
+
+  public MenuUpdatedEvent take() throws InterruptedException { return q.take(); }
+}
+
+===========================================
+D. 워커(페치→변환→이미지→배포 파이프라인)
+@Component
+@RequiredArgsConstructor
+public class Worker {
+
+  private final EventQueue queue;
+  private final PosClient posClient;
+  private final Transformer transformer;
+  private final ImageFetcher imageFetcher;
+  private final Deployer deployer;
+  private final PerStoreLock perStoreLock;
+  private final Executor ioExecutor; // @Qualifier("ioExecutor")로 주입
+
+  // 실행 중인 소비자 태스크들을 관리하기 위한 리스트
+  private final List<Future<?>> consumerFutures = new ArrayList<>();
+
+  @PostConstruct
+  public void startConsumers() {
+    int consumers = 16; // 병렬 소비자 수 (설정으로 분리 가능)
+    for (int i = 0; i < consumers; i++) {
+      // 각 태스크의 Future를 리스트에 추가
+      consumerFutures.add(
+          CompletableFuture.runAsync(this::consumeLoop, ioExecutor)
+      );
+    }
+  }
+
+  private void consumeLoop() {
+    // 현재 스레드가 인터럽트(중단 신호)를 받기 전까지 계속 실행
+    while (!Thread.currentThread().isInterrupted()) {
+      try {
+        // 큐가 비어있으면, 새 이벤트가 들어올 때까지 스레드는 여기서 효율적으로 대기(Blocked)
+        MenuUpdatedEvent ev = queue.take();
+        
+        perStoreLock.runExclusively(ev.getStoreId(), () -> {
+          var raw = posClient.fetchMenu(ev.getStoreId());
+          var std = transformer.toStandardMenu(raw);
+          var assetsDir = imageFetcher.downloadAll(std);
+          deployer.deploy(std, assetsDir, ev.getStoreId());
+        });
+      } catch (InterruptedException ie) {
+        // InterruptedException이 발생하면, 스레드의 중단 상태를 다시 설정하여
+        // 루프를 정상적으로 종료시키고 스레드를 안전하게 마무리한다.
+        Thread.currentThread().interrupt();
+      } catch (Exception e) {
+        // 그 외 예외는 로깅하고 루프를 계속 진행하여 다른 작업을 처리
+        // log.error("Error occurred in consumer loop", e);
+      }
+    }
+  }
+
+  // 애플리케이션이 종료될 때 Spring이 호출해주는 정리 메서드
+  @PreDestroy
+  public void stopConsumers() {
+    // 실행 중인 모든 소비자 태스크에 중단(interrupt) 신호를 보낸다.
+    // queue.take()에서 대기 중인 스레드는 InterruptedException을 받게 된다.
+    consumerFutures.forEach(future -> future.cancel(true));
+  }
+}
+
+Per-store 단일 실행 보장
+@Component
+public class PerStoreLock {
+  private final ConcurrentHashMap<String, ReentrantLock> locks = new ConcurrentHashMap<>();
+  public void runExclusively(String storeId, Runnable r) {
+    var lock = locks.computeIfAbsent(storeId, k -> new ReentrantLock());
+    lock.lock();
+    try { r.run(); } finally { lock.unlock(); }
+  }
+}
+
+===========================================
+E. WebClient(타임아웃/재시도 + 동시성 제어)
+@Configuration
+public class WebClientConfig {
+  @Bean
+  WebClient posWebClient() {
+    return WebClient.builder()
+      .baseUrl("https://pos.example.com")
+      .clientConnector(new ReactorClientHttpConnector(
+        HttpClient.create()
+          .responseTimeout(Duration.ofSeconds(10))
+          .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 3000)
+      ))
+      .build();
+  }
+}
+
+@Service
+@RequiredArgsConstructor
+public class PosClient {
+  private final WebClient posWebClient;
+
+  public Mono<PosMenuDto> fetchMenuMono(String storeId) {
+    return posWebClient.get()
+      .uri("/api/v1/stores/{id}/menu", storeId)
+      .retrieve()
+      .bodyToMono(PosMenuDto.class)
+      .timeout(Duration.ofSeconds(10))
+      .retryWhen(Retry.backoff(3, Duration.ofMillis(200)).filter(this::isRetryable));
+  }
+
+  public PosMenuDto fetchMenu(String storeId) { // 동기 API가 필요하면 block() 포인트 최소화
+    return fetchMenuMono(storeId).block();
+  }
+
+  private boolean isRetryable(Throwable t) { /* 5xx/네트워크만 재시도 */ return true; }
+}
+
+============================================
+F. 이미지 병렬 다운로드(동시성 제한)
+@Service
+public class ImageFetcher {
+  public Path downloadAll(StandardMenu std) throws IOException {
+    Path tmp = Files.createTempDirectory("assets-");
+    int concurrency = 16;
+    Flux.fromIterable(std.allImageUrls())
+        .flatMap(url -> downloadOne(url, tmp), concurrency) // 동시성 제한
+        .blockLast();
+    return tmp;
+  }
+
+  private Mono<Path> downloadOne(String url, Path dir) {
+    // WebClient 또는 java.net.http 사용. 파일 존재시 스킵, 해시 검증 등
+    return Mono.fromCallable(() -> {/* ... */ return dir;});
+  }
+}
+
+================================================
+G. 배포(외부 프로세스는 전용 풀에서)
+@Service
+@RequiredArgsConstructor
+public class Deployer {
+  @Async("deployExecutor")
+  public CompletableFuture<Void> deploy(StandardMenu std, Path assets, String storeId) {
+    // 1) std.menu.json 저장
+    // 2) rsync/scp 실행 (ProcessBuilder)
+    // 3) 종료코드/로그 확인
+    return CompletableFuture.completedFuture(null);
+  }
+}
+
+
