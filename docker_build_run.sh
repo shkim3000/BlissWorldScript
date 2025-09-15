@@ -59,12 +59,14 @@ APP_DIR_ADMIN="$ADMIN_BASE/apps/$APP_NAME"
 LOG_DIR_ADMIN="$ADMIN_BASE/logs"
 KEY_FILE_ADMIN="$ADMIN_BASE/keys/blissworld-firebase-key.json"
 WWW_DIR_ADMIN="$WWW_BASE_ADMIN/$DOMAIN" # [수정] www 경로는 이제 domain을 기준으로 합니다.
+SHOPS_DATA_ADMIN=$ADMIN_BASE/shops_data # [추가] shops_data 마운트. 25/09/13.
 
 # docker run -v 소스로 사용할 호스트 경로
 APP_DIR_HOST="$HOST_BASE/apps/$APP_NAME"
 LOG_DIR_HOST="$HOST_BASE/logs"
 KEY_FILE_HOST="$HOST_BASE/keys/blissworld-firebase-key.json"
 WWW_DIR_HOST="$WWW_BASE_HOST/$DOMAIN" # [수정] www 경로는 이제 domain을 기준으로 합니다.
+SHOPS_DATA_HOST=$HOST_BASE/shops_data # [추가] shops_data 마운트. 25/09/13.
 
 # 공용 경로/파일
 JAR_PATH="$APP_DIR_ADMIN/$JAR_FILE"
@@ -89,6 +91,15 @@ fi
 if [ ! -f "$JAR_PATH" ]; then
   echo "[ERROR] JAR file not found: $JAR_PATH" | tee -a "$LOG_FILE"
   exit 1
+fi
+
+# [추가] shops_data 마운트. 25/09/13.
+# Shops_data는 api 타입(shop)에서만 필수
+if [ "$SITE_TYPE" = "api" ] && [ "$APP_NAME" = "shop" ]; then
+  if [ ! -d "$SHOPS_DATA_ADMIN" ]; then
+    echo "[INFO] franchiseName:$APP_NAME/shops_data 디렉터리 생성: $SHOPS_DATA_ADMIN" | tee -a "$LOG_FILE"
+    mkdir -p "$SHOPS_DATA_ADMIN" || { echo "[ERROR] $SHOPS_DATA_ADMIN 생성 실패"; exit 1; }
+  fi
 fi
 
 # Firebase 키는 store 타입에서만 필수
@@ -176,6 +187,14 @@ DOCKER_RUN_ARGS=(
   --label "site.domain=$DOMAIN" # [추가] 컨테이너에 도메인 라벨을 추가하여, 업데이트 시 www 경로를 식별할 수 있도록 합니다.
 )
 
+# [추가] shops_data 마운트. 25/09/13.
+# api 타입/shop에만 shops_data 마운트
+if [ "$SITE_TYPE" = "api" ] && [ "$APP_NAME" = "shop" ]; then
+  DOCKER_RUN_ARGS+=( -v "$SHOPS_DATA_HOST":/app/shops_data )
+  echo "[INFO] Shops_data mount: $SHOPS_DATA_HOST -> /app/shops_data" | tee -a "$LOG_FILE"
+fi
+
+# [추가] 
 # store 타입만 키 마운트
 if [ "$SITE_TYPE" = "store" ]; then
   DOCKER_RUN_ARGS+=( -v "$KEY_FILE_HOST":/app/keys/blissworld-firebase-key.json:ro )
