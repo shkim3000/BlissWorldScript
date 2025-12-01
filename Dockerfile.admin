@@ -15,7 +15,7 @@ RUN groupadd --gid 1001 appgroup && \
 
 RUN apt-get update && \
     apt-get install -y \
-      nginx=1.18.0-6ubuntu14.6 dnsutils \
+      nginx=1.18.0-6ubuntu14.7 dnsutils \
       ca-certificates curl gnupg lsb-release sudo unzip \
       --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*
