@@ -11,11 +11,11 @@ RUN groupadd --gid 1001 appgroup && \
     groupadd --gid "${DOCKER_GID}" docker && \
     useradd --uid 1001 --gid 1001 --groups docker --shell /bin/bash --create-home appuser
 
-# 필수 도구 설치: certbot, nginx, docker CLI 등
+# 필수 도구 설치: nginx, docker CLI 등
 
 RUN apt-get update && \
     apt-get install -y \
-      nginx=1.18.0-6ubuntu14.7 dnsutils \
+    dnsutils \
       ca-certificates curl gnupg lsb-release sudo unzip \
       --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*

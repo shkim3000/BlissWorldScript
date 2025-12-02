@@ -62,7 +62,7 @@ server {
 
     # Certbot 인증을 위한 공통 경로
     location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
+        root /usr/share/nginx/html;
     }
 }
 EOF
@@ -133,7 +133,7 @@ if [ "$CERT_RESULT" != "skipped" ]; then
   # 출력을 tee로 파이핑하는 대신, 임시 파일로 리디렉션하여 파이프 관련 문제를 회피하네.
   # [수정] --nginx 플러그인 대신 --webroot 플러그인을 사용하네.
   # 'certonly'는 인증서만 발급하고 Nginx 설정을 건드리지 않아 훨씬 안전하네.
-  if ! docker exec nginx $CERTBOT_CMD certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN" --no-self-upgrade --quiet $STAGING_FLAG > "$CERTBOT_LOG.tmp" 2>&1; then
+  if ! docker exec nginx $CERTBOT_CMD certonly --webroot -w /usr/share/nginx/html -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN" --no-self-upgrade --quiet $STAGING_FLAG > "$CERTBOT_LOG.tmp" 2>&1; then
     cat "$CERTBOT_LOG.tmp" >> "$CERTBOT_LOG" && rm -f "$CERTBOT_LOG.tmp"
     CERT_RESULT="failed"
     echo "❌ Certbot 인증 실패. 로그 확인: $CERTBOT_LOG"
@@ -175,11 +175,18 @@ EOF
 server {
     listen 80;
     server_name $DOMAIN;
+
+    # Certbot 인증을 위한 공통 경로
+    include /etc/nginx/snippets/letsencrypt.conf;
+
     return 301 https://\$host\$request_uri;
 }
 server {
     listen 443 ssl;
     server_name $DOMAIN;
+
+    # 🔐 인증 갱신 경로 열기
+    include /etc/nginx/snippets/letsencrypt.conf;
 
     ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
@@ -221,11 +228,18 @@ EOF
 server {
     listen 80;
     server_name $DOMAIN;
+
+    # Certbot 인증을 위한 공통 경로
+    include /etc/nginx/snippets/letsencrypt.conf;
+    
     return 301 https://\$host\$request_uri;
 }
 server {
     listen 443 ssl;
     server_name $DOMAIN;
+
+    # 🔐 인증 갱신 경로 열기
+    include /etc/nginx/snippets/letsencrypt.conf;
 
     ssl_certificate /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
