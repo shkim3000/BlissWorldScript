@@ -249,6 +249,15 @@ ubuntu@ip-172-31-15-171:~/blissworld/scripts$ docker image inspect admin-app | g
                 "original.jar.file": "BlissWorldAdminWas-0.0.2-SNAPSHOT.jar"
 ubuntu@ip-172-31-15-171:~/blissworld/scripts$ 
 ```
+2.1 docker내 메모리 사용량 확인
+ubuntu@ip-172-31-15-171:~/blissworld/scripts$ docker stats
+CONTAINER ID   NAME      CPU %     MEM USAGE / LIMIT   MEM %     NET I/O           BLOCK I/O         PIDS
+a7fee27b2644   nginx     0.00%     7.125MiB / 128MiB   5.57%     3.23MB / 5.47MB   24.4MB / 410kB    3
+bfde51197fad   admin     0.12%     227.9MiB / 384MiB   59.34%    1.08MB / 920kB    75.9MB / 14.7MB   26
+9899cfe8884c   shop      0.19%     149MiB / 256MiB     58.22%    10.1kB / 126B     25.2MB / 14.2MB   23
+81d993dd7788   store1    0.13%     178.4MiB / 256MiB   69.67%    14.8kB / 126B     61.3MB / 18.7MB   24
+16d7d7bafc1c   possim    0.13%     154.7MiB / 256MiB   60.44%    14.9kB / 126B     44.9MB / 18.7MB   24
+75f539756866   vansim    0.10%     152.4MiB / 256MiB   59.54%    15kB / 126B       54.1MB / 18.7MB   24
 
 3. docker container에 진입 방법
 # 일반 사용자(appuser)로 "admin" container에 접속 (권장)
